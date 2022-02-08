@@ -88,7 +88,7 @@ byte memoire,RWtemp; // numero de la memoire EEPROM
 
 uint32_t registers[6] =  {0x4580A8, 0x80080C9, 0x4E42, 0x4B3, 0xBC803C, 0x580005} ; // 437 MHz avec ref à 25 MHz
 //uint32_t registers[6] =  {0, 0, 0, 0, 0xBC803C, 0x580005} ; // 437 MHz avec ref à 25 MHz
-int address,modif=0,WEE=0;
+int address,modif=0,WEE=0,beacon=0;
 int lcd_key = 0;
 int adc_key_in  = 0;
 int timer = 0,timer2=0; // utilisé pour mesurer la durée d'appui sur une touche
@@ -101,12 +101,26 @@ unsigned int long RFint,RFintold,INTA,RFcalc,PDRFout, MOD, FRAC;
 byte OutputDivider;byte lock=2;
 unsigned int long reg0, reg1;
 
+unsigned long int shift=1; // FSK shift frequency
+int cw_speed; // speed of CW (100ms = 12wpm, 240=5wpm))
+int cw_WPM=12;
+int FSK_shift=1;
+
 #define btnRIGHT  0
 #define btnUP     1
 #define btnDOWN   2
 #define btnLEFT   3
 #define btnSELECT 4
 #define btnNONE   5
+
+void SetCWSpeed (int WPM)
+// Set the cw_speed variable using WPM.
+  {
+    cw_speed=WPM2secs(WPM);
+    Serial.print(" Set CW speed to: ");
+    Serial.print(WPM);
+    Serial.print(" WPM\n");
+   } 
 
 //**************************** SP LECTURE BOUTONS ********************************************
 int read_LCD_buttons()
@@ -134,7 +148,8 @@ void printAll ()
 {
   //RFout=1001.10 // test
   lcd.setCursor(0, 0);
-  lcd.print("RF = ");
+  if (beacon==0) {lcd.print("RF = ");}
+  else {lcd.print("BEC= ");}
   if (RFint < 100000) lcd.print(" ");
   if (RFint < 10000)  lcd.print(" ");
   lcd.print(RFint/100);lcd.print(".");
@@ -200,17 +215,23 @@ long EEPROMReadlong(long address)
 void setup() {
   lcd.begin(16, 2); // two 16 characters lines
   lcd.display();
-  analogWrite(10,255); //Luminosite LCD
+
+ // Don't do this in case it has the LCD bug.
+  //analogWrite(10,255); //Luminosite LCD
+  // Better to do
+  digitalWrite(10, LOW);
+  pinMode(10, INPUT);
+  // Hardcoded for pin 10
 
   Serial.begin (19200); //  Serial to the PC via Arduino "Serial Monitor"  at 9600
   lcd.print("   GENERATEUR   ");
   lcd.setCursor(0, 1);
   lcd.print("    ADF4351     ");
   poscursor = 7; line = 0; 
-  delay(1000);
+  delay(100);
   lcd.setCursor(0, 0);
   lcd.print("   par F1CJN    ");
-   delay(1000);
+   delay(100);
 
   pinMode(2, INPUT);  // PIN 2 en entree pour lock
   pinMode(ADF4351_LE, OUTPUT);          // Setup pins
@@ -223,7 +244,7 @@ void setup() {
   else {PFDRFout=25;}
 
   if (EEPROM.read(101)==55){RFint=EEPROMReadlong(memoire*4);} // si une frequence est ecrite en EEPROM on la lit
-  else {RFint=7000;}
+  else {RFint=43250;}
 
   RFintold=1234;//pour que RFintold soit different de RFout lors de l'init
   RFout = RFint/100 ; // fréquence de sortie
@@ -233,15 +254,25 @@ void setup() {
   lcd.blink();
   printAll(); delay(500);
 
+   SetCWSpeed (cw_WPM);
+
 
 } // Fin setup
 
-//*************************************Loop***********************************
-void loop()
+
+void change_freq()
+/********************************************//**
+ * Change the frequency of the PLL (if required) if
+ * not just check the buttons and exit
+ * 
+ ***********************************************/
 {
+  
+  read_buttons(); // this a hack s.t. it will check the buttons
+                  // often...
   RFout=RFint;
   RFout=RFout/100;
-  if ((RFint != RFintold)|| (modif==1)) {
+ if ((RFint != RFintold)|| (modif==1) || (beacon)){
     //Serial.print(RFout,DEC);Serial.print("\r\n");
     if (RFout >= 2200) {
       OutputDivider = 1;
@@ -291,6 +322,8 @@ void loop()
     FRACF = (((RFout * OutputDivider) / PFDRFout) - INTA) * MOD;
     FRAC = round(FRACF); // On arrondit le résultat
 
+    if ((FSK_shift==0) && (beacon=1)) FRAC++; // if we're FSK I want the smallest shift
+
     registers[0] = 0;
     registers[0] = INTA << 15; // OK
     FRAC = FRAC << 3;
@@ -309,7 +342,19 @@ void loop()
     RFintold=RFint;modif=0;
     printAll();  // Affichage LCD
   }
+}
 
+void read_buttons()
+/********************************************//**
+ * Function to work out what button was pressed and
+ * decide what to do about it. It sets varibales
+ * WEE - reading/writing eprom
+ * RFint - the frequency to set the PLL
+ * becaon - carrier/becon mode
+ * PFDRFout - RF reference 25MHz internal 10MHz 
+ *            external
+ ***********************************************/
+{
   lcd_key = read_LCD_buttons();  // read the buttons
 
   switch (lcd_key)               // Select action
@@ -317,6 +362,7 @@ void loop()
     case btnRIGHT: //Droit
       poscursor++; // cursor to the right
       if (line == 0) {
+        if (poscursor == 1 ) {poscursor = 6; line = 0;};
         if (poscursor == 9 ) {
           poscursor = 10;
           line = 0; } //si curseur sur le .
@@ -335,8 +381,8 @@ void loop()
     case btnLEFT: //Gauche
       poscursor--; // décalage curseur
       if (line == 0) {
-        if (poscursor == 4) {poscursor = 15; line = 1;  };
-        if (poscursor == 9) {   poscursor = 8; line=0;}
+        if (poscursor == 5) { poscursor = 0; line=0;};
+        if (poscursor == 9) { poscursor = 8; line=0;}
       }
        if(line==1){
           if (poscursor==255) {poscursor=11; line=0;};
@@ -360,6 +406,10 @@ void loop()
         if (RFint > 440000)RFint = RFintold;
         //Serial.print(RFint,DEC);
         //Serial.print("  \r\n");
+
+        if( (poscursor==1) && (beacon==1))beacon=0;
+        else if ((poscursor==1)&&(beacon==0))beacon=1;
+        
       }
       if (line == 1)
       { 
@@ -375,8 +425,8 @@ void loop()
         else PFDRFout=25;// au cas ou PFDRF different de 10 et 25
         modif=1;  }
                     
-      if( (poscursor==0) && (WEE==1))WEE=0;
-      else if ((poscursor==0) && (WEE==0))WEE=1;                  
+        if( (poscursor==0) && (WEE==1))WEE=0;
+        else if ((poscursor==0) && (WEE==0))WEE=1;                  
       }
         printAll();
       break; // fin bouton up
@@ -391,7 +441,12 @@ void loop()
         if (poscursor == 11) RFint = RFint - 1 ;
         if (RFint < 3450) RFint = RFintold;
         if (RFint > 440000)  RFint = RFintold;
-        break;
+       
+        if((poscursor==0) && (beacon==1)) beacon=0;
+        else if ((poscursor==0)&&(beacon==0)) beacon=1;
+
+        printAll();
+      //  break;
       }
 
      if (line == 1)
@@ -451,3 +506,95 @@ void loop()
 }   // fin loop
 
 
+/********************************************//**
+ * Basic building blocks for CW
+ ***********************************************/
+void key_down() {FSK_shift=1;change_freq();}
+
+void key_up() {FSK_shift=0;change_freq();}
+
+void dash()
+{
+  key_up();
+  delay(cw_speed*3);
+  key_down();
+  delay(cw_speed);
+}
+
+void space() {delay(cw_speed*3);} 
+
+void dot()
+{
+  key_up();
+  delay(cw_speed);
+  key_down();
+  delay(cw_speed);
+}
+
+int WPM2secs (int WPM) {return 1200/WPM;}  // Convert from WPM to miliseconds.
+
+/********************************************//**
+ * Characters for CW
+ ***********************************************/
+void a() {dot();dash();space();Serial.print("a");}
+void b() {dash();dot();dot();dot();space();Serial.print("b");}
+void c() {dash();dot();dash();dot();space();Serial.print("c");}
+void d() {dash();dot();dot();space();Serial.print("d");}
+void e() {dot();space();Serial.print("e");}
+void f() {dot();dot();dash();dot();space();Serial.print("f");}
+void g() {dash();dash();dot();space();Serial.print("g");}
+void h() {dot();dot();dot();dot();space();Serial.print("h");}
+void eye() {dot();dot();space();Serial.print("i");}
+void j() {dot();dash();dash();dash();space();Serial.print("j");}
+void k() {dash();dot();dash();space();Serial.print("k");}
+void l() {dot();dash();dot();dot();space();Serial.print("l");}
+void m() {dash();dash();space(); Serial.print("m");}
+void n() {dash();dot();space();Serial.print("n");}
+void o() {dash();dash();dash();space();Serial.print("o");}
+void p() {dot();dash();dash();dot();space();Serial.print("p");}
+void q() {dash();dash();dot();dash();space();Serial.print("q");}
+void r() {dot();dash();dot();space();Serial.print("r");}
+void s() {dot();dot();dot();space();Serial.print("s");}
+void t() {dash();space();Serial.print("t");}
+void u() {dot();dot();dash();space();Serial.print("u");}
+void v() {dot();dot();dot();dash();space();Serial.print("v");}
+void w() {dot();dash();dash();space();Serial.print("w");}
+void x() {dash();dot();dot();dash();space();Serial.print("x");}
+void y() {dash();dot();dash();dash();space();Serial.print("y");}
+void z() {dash();dash();dot();dot();space();Serial.print("z");}
+
+/* Numbers */
+void zero()  {dash();dash();dash();dash();dash();space();Serial.print("0");}
+void one()   {dot();dash();dash();dash();dash();space();Serial.print("1");}
+void two()   {dot();dot();dash();dash();dash();space();Serial.print("2");}
+void three() {dot();dot();dot();dash();dash();space();Serial.print("3");}
+void four()  {dot();dot();dot();dot();dash();space();Serial.print("4");}
+void five()  {dot();dot();dot();dot();dot();space();Serial.print("5");}
+void six()   {dash();dot();dot();dot();dot();space();Serial.print("6");}
+void seven() {dash();dash();dot();dot();dot();space();Serial.print("7");}
+void eight() {dash();dash();dash();dot();dot();space();Serial.print("8");}
+void nine()  {dash();dash();dash();dash();dot();space();Serial.print("9");}
+
+/* Special Characters */
+void slash()     {dash();dot();dot();dash();dot();space();Serial.print("/");}
+void full_stop() {dot();dash();dot();dash();dot();dash();space();Serial.print(".");}
+void BT()        {dash();dot();dot();dot();dash();gap();Serial.print("<BT>\n");}
+void minus()     {dash();dot();dot();dot();dot();dash();space();Serial.print("-");}
+void gap()       {delay(cw_speed*7); Serial.print(" ");}
+
+void run_beacon()
+/********************************************//**
+ * Hard coded becon message
+ ***********************************************/
+{
+  m();zero();c();w();x();slash();b();gap();
+  eye();o();eight();two();x();k();gap();
+}
+
+
+
+void loop()
+{
+ if(beacon) run_beacon();
+ change_freq();
+}
