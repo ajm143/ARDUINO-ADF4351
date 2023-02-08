@@ -86,7 +86,111 @@ byte poscursor = 0; //position curseur courante 0 à 15
 byte line = 0; // ligne afficheur LCD en cours 0 ou 1
 byte memoire,RWtemp; // numero de la memoire EEPROM
 
+// Register 0
+// 0x4580A8
+// 3|3222222222211111|111110000000|000
+// 1|0987654321098765|432109876543|210
+//          010001011|000000010101|000
+//                                 CCC
+//
+// Reserved
+// 16-Bit INT value
+// 16-Bit FRAC value
+// Control
+
+// Register 1
+// 0x80080C9
+// 332|2|2|222222211111|111110000000|000
+// 109|8|7|654321098765|432109876543|210
+//    | |1|000000000001|000000011001|001
+// RRR                               CCC
+//
+// Reserve
+// Phase Adjust
+// Prescaler
+// 12-Bit PHASE value
+// 12-Bit MOD value
+// Control
+
+// Register 2
+// 0x4E42
+// 3|32|222|2|2|2222111111|1|1110|0|0|0|0|0|0|000
+// 1|09|876|5|4|3210987654|3|2109|8|7|6|5|4|3|210
+//  |  |   | | |        01|0|0111|0|0|1|0|0|0|010
+// R                                          CCC
+//
+// Reserved
+// Low Noise and Low Spur Modes
+// MUXOUT
+// Reference Doubler
+// RDIV2
+// 16-Bit R Counter
+// Double Buffer
+// Charge Pump Currnet Setting
+// LDF
+// LDP
+// PD Polarity
+// Power-Down
+// CP Three-State
+// Counter Reset
+// Control
+
+
+// Register 3
+// 0x4B3
+// 33222222|2|2|2|21|1|1|11|111110000000|000
+// 10987654|3|2|1|09|8|7|65|432109876543|210
+//         | | | |  | | |  |   010010110|011
+// RRRRRRRR       RR   R                 CCC 
+//
+// Reserved
+// Band Select Clock Mode
+// APB
+// Charge Cancel
+// Reserved
+// CSR
+// Reserved
+// Clock Div Mode
+// 12-Bit Clock Divider Value
+// Control
+
+// Register 4
+// 0xBC803C
+// 33222222|2|222|11111111|1|1|0|0|00|0|00|000
+// 10987654|3|210|98765432|1|0|9|8|76|5|43|210
+//         |1|011|11001000|0|0|0|0|00|1|11|100
+// RRRRRRRR                                CCC
+//
+// Reserved
+// Feedback Select
+// RF Divider Select
+// 8-Bit Band Select Clock Divider Value
+// VCO Power-Down
+// MTLD
+// Aux Output Select
+// Aux Output Enable
+// Aux Output Power
+// RF Output Enable
+// Output Power
+// Control
+
+// Register 5
+// 0x580005
+// 33222222|22|2|21|1111111110000000|000
+// 10987654|32|1|09|8765432109876543|210
+//         |01|0|11|0000000000000000|101
+// RRRRRRRR    R RR RRRRRRRRRRRRRRRR CCC
+//
+// Reserved
+// LD Pin Mode
+// Reserved
+// Reserved
+// Reserved
+// Control
+
 uint32_t registers[6] =  {0x4580A8, 0x80080C9, 0x4E42, 0x4B3, 0xBC803C, 0x580005} ; // 437 MHz avec ref à 25 MHz
+
+
 //uint32_t registers[6] =  {0, 0, 0, 0, 0xBC803C, 0x580005} ; // 437 MHz avec ref à 25 MHz
 int address,modif=0,WEE=0,beacon=0;
 int lcd_key = 0;
@@ -97,8 +201,9 @@ unsigned int i = 0;
 
 double RFout, REFin, INT, PFDRFout, OutputChannelSpacing, FRACF;
 double RFoutMin = 35, RFoutMax = 4400, REFinMax = 250, PDFMax = 32;
-unsigned int long RFint,RFintold,INTA,RFcalc,PDRFout, MOD, FRAC;
-byte OutputDivider;byte lock=2;
+unsigned int long RFint,RFintold,INTA,RFcalc,PDRFout, MOD, FRAC, SerialIn;
+byte OutputDivider;
+byte lock=2;
 unsigned int long reg0, reg1;
 
 unsigned long int shift=1; // FSK shift frequency
@@ -113,6 +218,7 @@ int FSK_shift=1;
 #define btnSELECT 4
 #define btnNONE   5
 
+//************************************ Set CW Speed ****************************************
 void SetCWSpeed (int WPM)
 // Set the cw_speed variable using WPM.
   {
@@ -168,6 +274,30 @@ void printAll ()
   lcd.setCursor(poscursor,line);
 }
 
+//************************************ Check for Lock ****************************************
+void check_lock(int val) 
+{
+  if (digitalRead(2)==1) Serial.print(" Locked\n");
+  else Serial.print(" No Lock\n");  
+}
+
+//************************************ Spur Reduction ****************************************
+void reduce_spur(int val) 
+{
+  if (val==1){
+  bitWrite (registers[2], 29, 1); // Low Spur
+  bitWrite (registers[2], 30, 1);
+  Serial.print(" Low spur mode.\n");
+  }
+  else
+ {  
+  bitWrite (registers[2], 29, 0); // Low noise
+  bitWrite (registers[2], 30, 0);
+  Serial.print(" Low noise mode.\n");
+ }
+}
+
+//************************************ Write a register ****************************************
 void WriteRegister32(const uint32_t value)   //Programme un registre 32bits
 {
   digitalWrite(ADF4351_LE, LOW);
@@ -177,9 +307,17 @@ void WriteRegister32(const uint32_t value)   //Programme un registre 32bits
   digitalWrite(ADF4351_LE, LOW);
 }
 
+//************************************ Write all Registers ****************************************
 void SetADF4351()  // Programme tous les registres de l'ADF4351
 { for (int i = 5; i >= 0; i--)  // programmation ADF4351 en commencant par R5
+    {
     WriteRegister32(registers[i]);
+    Serial.print(i,DEC);
+    Serial.print(" ");
+    Serial.print(registers[i],BIN);
+    Serial.print("\n");
+    }
+  Serial.print(" ");
 }
 
 // *************** SP ecriture Mot long (32bits) en EEPROM  entre adress et adress+3 **************
@@ -211,6 +349,7 @@ long EEPROMReadlong(long address)
       //Retourne le long(32bits) en utilisant le shift de 0, 8, 16 et 24 bits et des masques
       return ((quatre << 0) & 0xFF) + ((trois << 8) & 0xFFFF) + ((deux << 16) & 0xFFFFFF) + ((un << 24) & 0xFFFFFFFF);
       }
+
 //************************************ Setup ****************************************
 void setup() {
   lcd.begin(16, 2); // two 16 characters lines
@@ -224,6 +363,7 @@ void setup() {
   // Hardcoded for pin 10
 
   Serial.begin (19200); //  Serial to the PC via Arduino "Serial Monitor"  at 9600
+  Serial.print("Connected at 19200 Baud\n");
   lcd.print("   GENERATEUR   ");
   lcd.setCursor(0, 1);
   lcd.print("    ADF4351     ");
@@ -254,12 +394,46 @@ void setup() {
   lcd.blink();
   printAll(); delay(500);
 
-   SetCWSpeed (cw_WPM);
-
+  SetCWSpeed (cw_WPM);
 
 } // Fin setup
 
+//************************************ Power Set ****************************************
+void power_set(int power)
+{
+/* Set the registers to tell ADF4351 that we'd like different power levels.
+ *  Note that this funciton does not set the pwer, that's done when we write to 
+ *  the synth.
+ */
+  
+/* D4 D3
+ * D2 D1
+   1 0 -4dBm
+   0 1 -1dBm
+   1 0 +2dBm
+   1 1 +5dBm
+  */
+Serial.print(" Set power to: ");
+switch(power)
+{
+  case 1: bitWrite (registers[4], 4, 0); bitWrite (registers[4], 3, 0); Serial.print("-4dBm\n"); break;
+  case 2: bitWrite (registers[4], 4, 0); bitWrite (registers[4], 3, 1); Serial.print("-1dBm\n"); break;
+  case 3: bitWrite (registers[4], 4, 1); bitWrite (registers[4], 3, 0); Serial.print("+2dBm\n"); break;
+  case 4: bitWrite (registers[4], 4, 1); bitWrite (registers[4], 3, 1); Serial.print("+4dBm\n"); break;
+}
+}
 
+
+void set_MOD(unsigned long MOD)
+{
+    registers[1] = MOD << 3;
+    registers[1] = registers[1] + 1 ; // ajout de l'adresse "001"
+}
+
+
+
+
+//************************************ Change Freq ****************************************
 void change_freq()
 /********************************************//**
  * Change the frequency of the PLL (if required) if
@@ -329,21 +503,41 @@ void change_freq()
     FRAC = FRAC << 3;
     registers[0] = registers[0] + FRAC;
 
-    registers[1] = 0;
-    registers[1] = MOD << 3;
-    registers[1] = registers[1] + 1 ; // ajout de l'adresse "001"
-    bitSet (registers[1], 27); // Prescaler sur 8/9
+    registers[1] = 0; // This needs sorting
+    set_MOD(MOD);
+    
+    // Prescaler sur 8/9    
+    bitWrite (registers[1], 27, 1); 
 
-    bitSet (registers[2], 28); // Digital lock == "110" sur b28 b27 b26
-    bitSet (registers[2], 27); // digital lock 
-    bitClear (registers[2], 26); // digital lock
+    // MUXOUT Digital lock == "110" sur b28 b27 b26
+    bitWrite (registers[2], 28, 1);
+    bitWrite (registers[2], 27, 1); 
+    bitWrite (registers[2], 26, 0); 
    
     SetADF4351();  // Programme tous les registres de l'ADF4351
     RFintold=RFint;modif=0;
     printAll();  // Affichage LCD
+    Serial.print("Changed frequency to: ");
+    Serial.print(RFout);
+    Serial.print("\n");
   }
 }
 
+
+void set_FRAC(unsigned long FRAC)
+{
+  delay(1);
+}
+
+void set_MUXOUT(int MUX)
+{
+   delay(1);
+}
+
+void set_Prescaler()
+{
+   delay(1);
+}
 void read_buttons()
 /********************************************//**
  * Function to work out what button was pressed and
@@ -591,10 +785,32 @@ void run_beacon()
   eye();o();eight();two();x();k();gap();
 }
 
-
-
 void loop()
 {
  if(beacon) run_beacon();
  change_freq();
-}
+
+   if (Serial.available()) {
+    SerialIn=Serial.parseInt(); //freq in MHZ or code
+
+    switch(SerialIn)
+    {
+      case  1: RFint=131700; break; 
+      case  2: RFint=177600; break; 
+      case  3: RFint=188800; break;
+      case  4: RFint=266400; break; 
+      case  5: RFint=296800; break; 
+      case  6: RFint=440000; break; 
+      case 11: power_set(1); break;
+      case 12: power_set(2); break;
+      case 13: power_set(3); break;
+      case 14: power_set(4); break;
+      case 20: reduce_spur(0); break; // reduce noise
+      case 21: reduce_spur(1); break; // reduce spur
+      case 99: check_lock(1); break;  // query PLL lock 
+      default: RFint=SerialIn/10; break; // frequency in kHz
+    }
+    SetADF4351();
+   }
+} 
+
