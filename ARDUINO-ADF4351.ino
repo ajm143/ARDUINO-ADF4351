@@ -78,7 +78,7 @@
 #include <EEPROM.h>
 #include <SPI.h>
 
-#define ADF4351_LE 3
+
 
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 
@@ -201,8 +201,9 @@ unsigned int i = 0;
 
 double RFout, REFin, INT, PFDRFout, OutputChannelSpacing, FRACF;
 double RFoutMin = 35, RFoutMax = 4400, REFinMax = 250, PDFMax = 32;
-unsigned int long RFint,RFintold,INTA,RFcalc,PDRFout, MOD, FRAC, SerialIn;
-byte OutputDivider;
+unsigned int long RFint, RFintold, INTA, RFcalc, PDRFout, MOD, FRAC;
+
+int OutputDivider;
 byte lock=2;
 unsigned int long reg0, reg1;
 
@@ -210,6 +211,7 @@ unsigned long int shift=1; // FSK shift frequency
 int cw_speed; // speed of CW (100ms = 12wpm, 240=5wpm))
 int cw_WPM=12;
 int FSK_shift=1;
+int first_run=1;
 
 #define btnRIGHT  0
 #define btnUP     1
@@ -217,6 +219,12 @@ int FSK_shift=1;
 #define btnLEFT   3
 #define btnSELECT 4
 #define btnNONE   5
+
+int sensorPin = A7; 
+
+int ADF4351_LE = 5;   // NANO
+//int ADF4351_LE = 3;  // UNO
+int ADF4351_MUX = 2;
 
 //************************************ Set CW Speed ****************************************
 void SetCWSpeed (int WPM)
@@ -268,16 +276,16 @@ void printAll ()
   else {lcd.print("WEE=");}
   if (memoire<10)lcd.print(" ");
   lcd.print(memoire,DEC);
-  if  ((digitalRead(2)==1))lcd.print(" LOCKED ");
+  if  ((digitalRead(ADF4351_MUX)==1))lcd.print(" LOCKED ");
   else lcd.print(" NOLOCK ");
   lcd.print(PFDRFout,DEC);
   lcd.setCursor(poscursor,line);
 }
 
 //************************************ Check for Lock ****************************************
-void check_lock(int val) 
+void check_lock() 
 {
-  if (digitalRead(2)==1) Serial.print(" Locked\n");
+  if (digitalRead(ADF4351_MUX)==1) Serial.print(" Locked\n");
   else Serial.print(" No Lock\n");  
 }
 
@@ -309,7 +317,8 @@ void WriteRegister32(const uint32_t value)   //Programme un registre 32bits
 
 //************************************ Write all Registers ****************************************
 void SetADF4351()  // Programme tous les registres de l'ADF4351
-{ for (int i = 5; i >= 0; i--)  // programmation ADF4351 en commencant par R5
+{ Serial.print("======== SetADF ========\n");
+ for (int i = 5; i >= 0; i--)  // programmation ADF4351 en commencant par R5
     {
     WriteRegister32(registers[i]);
     Serial.print(i,DEC);
@@ -317,6 +326,7 @@ void SetADF4351()  // Programme tous les registres de l'ADF4351
     Serial.print(registers[i],BIN);
     Serial.print("\n");
     }
+  Serial.print("========        ========\n");
   Serial.print(" ");
 }
 
@@ -355,6 +365,8 @@ void setup() {
   lcd.begin(16, 2); // two 16 characters lines
   lcd.display();
 
+  analogReference(DEFAULT);
+
  // Don't do this in case it has the LCD bug.
   //analogWrite(10,255); //Luminosite LCD
   // Better to do
@@ -363,7 +375,7 @@ void setup() {
   // Hardcoded for pin 10
 
   Serial.begin (19200); //  Serial to the PC via Arduino "Serial Monitor"  at 9600
-  Serial.print("Connected at 19200 Baud\n");
+  Serial.print("\n\n\nConnected at 19200 Baud\n");
   lcd.print("   GENERATEUR   ");
   lcd.setCursor(0, 1);
   lcd.print("    ADF4351     ");
@@ -373,7 +385,7 @@ void setup() {
   lcd.print("   par F1CJN    ");
    delay(100);
 
-  pinMode(2, INPUT);  // PIN 2 en entree pour lock
+  pinMode(ADF4351_MUX, INPUT);  // PIN 2 en entree pour lock
   pinMode(ADF4351_LE, OUTPUT);          // Setup pins
   digitalWrite(ADF4351_LE, HIGH);
   SPI.begin();                          // Init SPI bus
@@ -431,65 +443,23 @@ void set_MOD(unsigned long MOD)
 }
 
 
-
-
 //************************************ Change Freq ****************************************
 void change_freq()
 /********************************************//**
  * Change the frequency of the PLL (if required) if
  * not just check the buttons and exit
- * 
  ***********************************************/
 {
   
-  read_buttons(); // this a hack s.t. it will check the buttons
+  //read_buttons(); // this a hack s.t. it will check the buttons
                   // often...
   RFout=RFint;
   RFout=RFout/100;
- if ((RFint != RFintold)|| (modif==1) || (beacon)){
-    //Serial.print(RFout,DEC);Serial.print("\r\n");
-    if (RFout >= 2200) {
-      OutputDivider = 1;
-      bitWrite (registers[4], 22, 0);
-      bitWrite (registers[4], 21, 0);
-      bitWrite (registers[4], 20, 0);
-    }
-    if (RFout < 2200) {
-      OutputDivider = 2;
-      bitWrite (registers[4], 22, 0);
-      bitWrite (registers[4], 21, 0);
-      bitWrite (registers[4], 20, 1);
-    }
-    if (RFout < 1100) {
-      OutputDivider = 4;
-      bitWrite (registers[4], 22, 0);
-      bitWrite (registers[4], 21, 1);
-      bitWrite (registers[4], 20, 0);
-    }
-    if (RFout < 550)  {
-      OutputDivider = 8;
-      bitWrite (registers[4], 22, 0);
-      bitWrite (registers[4], 21, 1);
-      bitWrite (registers[4], 20, 1);
-    }
-    if (RFout < 275)  {
-      OutputDivider = 16;
-      bitWrite (registers[4], 22, 1);
-      bitWrite (registers[4], 21, 0);
-      bitWrite (registers[4], 20, 0);
-    }
-    if (RFout < 137.5) {
-      OutputDivider = 32;
-      bitWrite (registers[4], 22, 1);
-      bitWrite (registers[4], 21, 0);
-      bitWrite (registers[4], 20, 1);
-    }
-    if (RFout < 68.75) {
-      OutputDivider = 64;
-      bitWrite (registers[4], 22, 1);
-      bitWrite (registers[4], 21, 1);
-      bitWrite (registers[4], 20, 0);
-    }
+ //if ((RFint != RFintold)|| (modif==1) || (beacon)){
+   
+    OutputDivider = GetOutputDivider(RFout);
+
+    Serial.print("OutputDivider: ");Serial.print(OutputDivider,DEC);Serial.print("\r\n");
 
     INTA = (RFout * OutputDivider) / PFDRFout;
     MOD = (PFDRFout / OutputChannelSpacing);
@@ -506,23 +476,63 @@ void change_freq()
     registers[1] = 0; // This needs sorting
     set_MOD(MOD);
     
-    // Prescaler sur 8/9    
-    bitWrite (registers[1], 27, 1); 
+    set_Prescaler(0); //dummy number '0'
 
-    // MUXOUT Digital lock == "110" sur b28 b27 b26
-    bitWrite (registers[2], 28, 1);
-    bitWrite (registers[2], 27, 1); 
-    bitWrite (registers[2], 26, 0); 
+    set_MUXOUT(0); //dummy number '0'
    
-    SetADF4351();  // Programme tous les registres de l'ADF4351
+    //SetADF4351();  // Programme tous les registres de l'ADF4351
     RFintold=RFint;modif=0;
     printAll();  // Affichage LCD
-    Serial.print("Changed frequency to: ");
-    Serial.print(RFout);
-    Serial.print("\n");
-  }
+    Serial.print("Changed frequency to: "); Serial.print(RFout); Serial.print("\n");
+ // }
 }
 
+int GetOutputDivider(double RFout)
+{
+    if (RFout >= 2200) {
+      bitWrite (registers[4], 22, 0);
+      bitWrite (registers[4], 21, 0);
+      bitWrite (registers[4], 20, 0);
+      return 1;
+    }
+    if (RFout >= 1100) {
+      bitWrite (registers[4], 22, 0);
+      bitWrite (registers[4], 21, 0);
+      bitWrite (registers[4], 20, 1);
+      return 2;
+    }
+    if (RFout >= 550) {
+      bitWrite (registers[4], 22, 0);
+      bitWrite (registers[4], 21, 1);
+      bitWrite (registers[4], 20, 0);
+      return 4;
+    }
+    if (RFout >= 275)  {
+      bitWrite (registers[4], 22, 0);
+      bitWrite (registers[4], 21, 1);
+      bitWrite (registers[4], 20, 1);
+      return 8;
+    }
+    if (RFout >= 137.5)  {
+      bitWrite (registers[4], 22, 1);
+      bitWrite (registers[4], 21, 0);
+      bitWrite (registers[4], 20, 0);
+      return 16;
+    }
+    if (RFout >= 68.75) {
+      bitWrite (registers[4], 22, 1);
+      bitWrite (registers[4], 21, 0);
+      bitWrite (registers[4], 20, 1);
+      return 32;
+    }
+    else {
+      bitWrite (registers[4], 22, 1);
+      bitWrite (registers[4], 21, 1);
+      bitWrite (registers[4], 20, 0);
+      return 64;
+    }
+
+}
 
 void set_FRAC(unsigned long FRAC)
 {
@@ -531,12 +541,16 @@ void set_FRAC(unsigned long FRAC)
 
 void set_MUXOUT(int MUX)
 {
-   delay(1);
+    // MUXOUT Digital lock == "110" sur b28 b27 b26
+    bitWrite (registers[2], 28, 1);
+    bitWrite (registers[2], 27, 1); 
+    bitWrite (registers[2], 26, 0); 
 }
 
-void set_Prescaler()
+void set_Prescaler(int prescaler)
 {
-   delay(1);
+      // Prescaler sur 8/9    
+    bitWrite (registers[1], 27, 1); 
 }
 void read_buttons()
 /********************************************//**
@@ -785,32 +799,200 @@ void run_beacon()
   eye();o();eight();two();x();k();gap();
 }
 
+int readRotarySwitch(int in) // in=0 be silent, 1=report value
+{
+  int sensorValue = 0; 
+  
+  sensorValue = analogRead(sensorPin);
+  if (in>0)
+  {
+   Serial.print(" Sensor Value:");
+   Serial.println(sensorValue);
+   Serial.print("\n");
+  }
+  if (sensorValue < 10) return 12;
+  if (sensorValue < 100) return 11;
+  if (sensorValue < 200) return 10;
+  if (sensorValue < 300) return 9;
+  if (sensorValue < 400) return 8;
+  if (sensorValue < 500) return 7;
+  if (sensorValue < 600) return 6;
+  if (sensorValue < 700) return 5;
+  if (sensorValue < 800) return 4;
+  if (sensorValue < 900) return 3;
+  if (sensorValue < 1000) return 2;
+
+  else return 1;
+}
+
+unsigned long preset_frequency(int in)
+{
+       switch(in)
+       {
+        case  1: return 131700;  break; 
+        case  2: return 177600;  break; 
+        case  3: return 188800; break;
+        case  4: return 266400;  break; 
+        case  5: return 296800; break; 
+        case  6: return 440000;  break; 
+        case  7: return 43250; break;
+        case  8: return 43251; break;
+        case  9: return 43252; break;
+        case  10: return 43253; break;
+        case  11: return 43254; break;
+        case  12: return 43255; break;
+       }
+  }
+
+void VXOKnob(int in) // in=0 be silent, 1=report value
+ {
+   static int SwitchPos;
+   int ReadSwitch;    
+   ReadSwitch =  readRotarySwitch(in); 
+   if (ReadSwitch!=SwitchPos) // switch has moved
+  {   
+   Serial.print(" Switch has moved to: "); Serial.println(SwitchPos); Serial.print("\n");    
+   SwitchPos = ReadSwitch;
+   RFint = preset_frequency(SwitchPos);
+   change_freq();
+   SetADF4351();
+   check_lock();
+  }
+}
+
+void test_mode()
+{
+  Serial.print(" Test Mode:\n ");  
+  power_set(4);
+  RFint=43250; change_freq(); SetADF4351();
+}
+
+#define MAX_MESSAGE 30
+
+void read_buffer() {
+  static char buffer[MAX_MESSAGE];
+  static unsigned char index = 0;
+  char inch;
+  
+  while (Serial.available() > 0) {
+    inch = Serial.read();
+    if (inch == '\r') {
+      Serial.print("You entered: ");
+      Serial.println(buffer);
+      buffer[0] = 0;
+      index = 0;
+    } else {        
+      if (index < MAX_MESSAGE-1) {
+        buffer[index++] = inch;
+        buffer[index] = 0;
+      }
+    }
+  } 
+}
+
+void display_help() {
+  Serial.print(" D  - Debug Mode \n"); 
+  Serial.print(" Fx - Change frequency to x \n");   
+  Serial.print(" H  - Display Help\n");  
+  Serial.print(" L  - Check MUX lock\n"); 
+  Serial.print(" Mx - Use Memory x\n"); 
+  Serial.print(" Px - Change power level to x\n"); 
+  Serial.print(" Sx - x=0 reduce noise x=1 reduce spurs\n"); 
+  Serial.print(" W   - write changes to ADF4351\n"); 
+}
+
 void loop()
 {
- if(beacon) run_beacon();
- change_freq();
+  signed int long  SerialIn;
 
-   if (Serial.available()) {
-    SerialIn=Serial.parseInt(); //freq in MHZ or code
+  char inch;
 
-    switch(SerialIn)
-    {
-      case  1: RFint=131700; break; 
-      case  2: RFint=177600; break; 
-      case  3: RFint=188800; break;
-      case  4: RFint=266400; break; 
-      case  5: RFint=296800; break; 
-      case  6: RFint=440000; break; 
-      case 11: power_set(1); break;
-      case 12: power_set(2); break;
-      case 13: power_set(3); break;
-      case 14: power_set(4); break;
-      case 20: reduce_spur(0); break; // reduce noise
-      case 21: reduce_spur(1); break; // reduce spur
-      case 99: check_lock(1); break;  // query PLL lock 
-      default: RFint=SerialIn/10; break; // frequency in kHz
-    }
-    SetADF4351();
+  if(first_run==1) test_mode();
+  if(beacon) run_beacon();
+  VXOKnob(0); // check the rotary switch
+
+  while (Serial.available() > 0) {
+   inch = Serial.read();
+  // ========================================================================
+   // Debug Mode
+   // ========================================================================
+   // A mode for stuffing test functions in and calling them by number
+   if(inch == 'D') { 
+     Serial.print(" Debug Mode: \n"); 
+     SerialIn=Serial.parseInt();
+      switch(SerialIn){
+         case  79: VXOKnob(1); break;          // DEBUG: Talk to VXOKnob() in verbose mode
+         case 996: read_buffer(); break;       // DEBUG: test serial reading
+         case 997: readRotarySwitch(1); break; // DEBUG: Get the value from the rotary switch
+         case 998: test_mode(); break;         // DEBUG: go to a 432.5 MHz and run QRO
+      }
    }
+   // ========================================================================
+   // Change Frequency
+   // ========================================================================
+    else if(inch == 'F') { 
+     Serial.print(" Change frequency: \n");   
+     SerialIn=Serial.parseInt();
+     if(SerialIn < 35000 || SerialIn > 4400000) {
+       Serial.print(" Current Freq: \n"); Serial.println(RFint); // Complain out of range
+     }
+     else {
+       RFint=SerialIn/10; change_freq();SetADF4351(); 
+     }
+   } 
+   // ========================================================================
+   // Help
+   // ========================================================================
+   else if(inch == 'H') display_help();
+   // ========================================================================
+   // Check MUX Lock
+   // ========================================================================
+   else if (inch == 'L') { 
+     Serial.print(" Check Lock: \n"); 
+     check_lock();
+   }
+   // ========================================================================
+   // Change frequency to a Memory
+   // ========================================================================
+    else if (inch == 'M') { // memory
+     Serial.print(" Change to memory:\n"); 
+     SerialIn=Serial.parseInt();
+     if(SerialIn >= 1 && SerialIn <= 12) {
+         RFint=preset_frequency(SerialIn); 
+         change_freq(); 
+         SetADF4351();
+        }
+      else Serial.print(" Unknown memory location\n"); 
+    }
+  // ========================================================================
+   // Change Power Level 
+   // ========================================================================
+   else if (inch == 'P') { 
+     Serial.print(" Change power:\n");   
+     SerialIn=Serial.parseInt();
+     if(SerialIn >= 1 && SerialIn <= 4) power_set(SerialIn);
+     else Serial.print(" Unknown power level\n"); 
+   }
+   // ========================================================================
+   // Switch between low noise and low spur
+   // ========================================================================
+   // 0 Reduce Noise
+   // 1 Reduce Spur
+   else if (inch == 'S') { 
+     Serial.print(" Reduce Noise=0, Reduce Spur=1\n"); 
+     if(SerialIn >= 0 && SerialIn <= 1) reduce_spur(SerialIn); 
+     else Serial.print(" Unknown Spur/Noise level\n"); 
+   }
+   // ========================================================================
+   // Write to ADF4351
+   // ========================================================================
+   else if (inch == 'W') { 
+     Serial.print(" Write to ADF4351\n");      
+     SetADF4351();
+   }
+  }
+    
+  first_run=0;
+  delay(250);
 } 
 
