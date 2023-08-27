@@ -1,4 +1,10 @@
 # ARDUINO-ADF4351
-ADF4351 synthetizer board driven by an ARDUINO and LCD KEYPAD SHIELD Module.
+Original F1CJN heavily modified to:
+* Run on a Arduino Nano
+* Not run with an LCD shield
+* Choose frequencies from a rotary switch
+* Take comands from serial in
 
-Current modifications include a hacked on beacon mode.
+ADF4351 synthetizer board driven by an ARDUINO Nano
+
+M0CWX Aug 2023
