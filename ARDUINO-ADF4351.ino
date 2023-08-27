@@ -78,8 +78,6 @@
 #include <EEPROM.h>
 #include <SPI.h>
 
-
-
 LiquidCrystal lcd(8, 9, 4, 5, 6, 7);
 
 byte poscursor = 0; //position curseur courante 0 à 15
@@ -190,7 +188,6 @@ byte memoire,RWtemp; // numero de la memoire EEPROM
 
 uint32_t registers[6] =  {0x4580A8, 0x80080C9, 0x4E42, 0x4B3, 0xBC803C, 0x580005} ; // 437 MHz avec ref à 25 MHz
 
-
 //uint32_t registers[6] =  {0, 0, 0, 0, 0xBC803C, 0x580005} ; // 437 MHz avec ref à 25 MHz
 int address,modif=0,WEE=0,beacon=0;
 int lcd_key = 0;
@@ -212,6 +209,34 @@ int cw_speed; // speed of CW (100ms = 12wpm, 240=5wpm))
 int cw_WPM=12;
 int FSK_shift=1;
 int first_run=1;
+int memBank=3;
+
+unsigned int long memFrequency[4][12]={
+//144,    432,  1296,  2300,  2320,  3400,5760/2,5760/3
+{2850 ,  5050,  7020, 14450, 43250,129676,230076,232075,340076,420000,430000,440000}, 
+{11600, 40400,126800,227200,229200,337200,286600,191067,232076,129676, 43250, 14450},
+{14450, 28800,115200,215600,217600,325600,280800,187200,340076,232076,129676, 43250},
+{28800, 43250, 86400,186800,188800,296800,266400,177600,340076,232076,129676, 14450},
+};
+
+// Beacons
+// 28Mhz iF
+// 144 IF
+// 432 IF
+//    131700, 
+//    177600, 
+//    188800,
+//    266400,
+//    296800,
+//    440000,
+//     14450,
+//     43250,
+//    129676,
+//    230036,
+//    232076,
+//   196800
+
+
 
 #define btnRIGHT  0
 #define btnUP     1
@@ -225,6 +250,7 @@ int sensorPin = A7;
 int ADF4351_LE = 5;   // NANO
 //int ADF4351_LE = 3;  // UNO
 int ADF4351_MUX = 2;
+
 
 //************************************ Set CW Speed ****************************************
 void SetCWSpeed (int WPM)
@@ -393,7 +419,7 @@ void setup() {
   SPI.setBitOrder(MSBFIRST);            // poids forts en tête
 
   if (EEPROM.read(100)==55){PFDRFout=EEPROM.read(20*4);} // si la ref est ecrite en EEPROM, on la lit
-  else {PFDRFout=25;}
+  else {PFDRFout=10;} // Initialise referecnce to 10 MHz
 
   if (EEPROM.read(101)==55){RFint=EEPROMReadlong(memoire*4);} // si une frequence est ecrite en EEPROM on la lit
   else {RFint=43250;}
@@ -407,7 +433,7 @@ void setup() {
   printAll(); delay(500);
 
   SetCWSpeed (cw_WPM);
-
+  
 } // Fin setup
 
 //************************************ Power Set ****************************************
@@ -465,6 +491,9 @@ void change_freq()
     MOD = (PFDRFout / OutputChannelSpacing);
     FRACF = (((RFout * OutputDivider) / PFDRFout) - INTA) * MOD;
     FRAC = round(FRACF); // On arrondit le résultat
+
+    Serial.print("INTA: ");Serial.println(INTA);
+    Serial.print("PFDRFout: ");Serial.println(PFDRFout);
 
     if ((FSK_shift==0) && (beacon=1)) FRAC++; // if we're FSK I want the smallest shift
 
@@ -537,6 +566,11 @@ int GetOutputDivider(double RFout)
 void set_FRAC(unsigned long FRAC)
 {
   delay(1);
+}
+
+void set_REF(unsigned long In)
+{
+  PFDRFout=In;
 }
 
 void set_MUXOUT(int MUX)
@@ -717,9 +751,9 @@ void read_buttons()
 /********************************************//**
  * Basic building blocks for CW
  ***********************************************/
-void key_down() {FSK_shift=1;change_freq();}
+void key_down() {FSK_shift=1;change_freq();SetADF4351();}
 
-void key_up() {FSK_shift=0;change_freq();}
+void key_up() {FSK_shift=0;change_freq();SetADF4351();}
 
 void dash()
 {
@@ -827,21 +861,24 @@ int readRotarySwitch(int in) // in=0 be silent, 1=report value
 
 unsigned long preset_frequency(int in)
 {
-       switch(in)
-       {
-        case  1: return 131700;  break; 
-        case  2: return 177600;  break; 
-        case  3: return 188800; break;
-        case  4: return 266400;  break; 
-        case  5: return 296800; break; 
-        case  6: return 440000;  break; 
-        case  7: return 43250; break;
-        case  8: return 43251; break;
-        case  9: return 43252; break;
-        case  10: return 43253; break;
-        case  11: return 43254; break;
-        case  12: return 43255; break;
-       }
+  return memFrequency[memBank][in-1]; 
+
+  //     switch(in)
+  //     {
+  //      case  1: return  131700;  break; 
+  //      case  2: return  177600;  break; 
+  //      case  3: return  188800; break;
+  //      case  4: return  266400;  break; 
+  //      case  5: return  296800; break; 
+  //      case  6: return  440000;  break; 
+  //      case  7: return   14450; break;
+  //      case  8: return   43250; break;
+  //      case  9: return  129676; break;
+  //      case  10: return 230036; break;
+  //      case  11: return 232076; break;
+  //      case  12: return 340076; break;
+  //     }
+    
   }
 
 void VXOKnob(int in) // in=0 be silent, 1=report value
@@ -892,13 +929,27 @@ void read_buffer() {
 
 void display_help() {
   Serial.print(" D  - Debug Mode \n"); 
-  Serial.print(" Fx - Change frequency to x \n");   
+  Serial.print("      1 Becon mode on  \n"); 
+  Serial.print("      2 Becon mode off  \n"); 
+  Serial.print(" Fx - Change frequency to x \n");  
+  Serial.print(" G  - write contents of current frequency bank\n"); 
   Serial.print(" H  - Display Help\n");  
   Serial.print(" L  - Check MUX lock\n"); 
   Serial.print(" Mx - Use Memory x\n"); 
   Serial.print(" Px - Change power level to x\n"); 
+  Serial.print(" R -  Toggle reference 10 MHz /25 MHz x\n"); 
   Serial.print(" Sx - x=0 reduce noise x=1 reduce spurs\n"); 
-  Serial.print(" W   - write changes to ADF4351\n"); 
+  Serial.print(" W  - write changes to ADF4351\n"); 
+  Serial.print(" Yx - Change memory bank to x\n"); 
+  Serial.print("      x=0 beacons, x=1=28Mhz, x=2 144Mhz, x=432MHz IF\n");   
+}
+
+void serial_write_memFrequency()
+{
+  int i;
+   for (i = 0; i < 12; i++) {
+     Serial.print(i+1);Serial.print(' ');Serial.print(memFrequency[memBank][i]*10);Serial.print(" kHz\n");
+   }
 }
 
 void loop()
@@ -922,6 +973,9 @@ void loop()
      SerialIn=Serial.parseInt();
       switch(SerialIn){
          case  79: VXOKnob(1); break;          // DEBUG: Talk to VXOKnob() in verbose mode
+         case   1: beacon=1;run_beacon(); break;         // DEBUG: Beacon Mode on
+         case   2: beacon=0;change_freq();SetADF4351(); break; // DEBUG: Beacon Mode Off
+         case  10: serial_write_memFrequency(); break;
          case 996: read_buffer(); break;       // DEBUG: test serial reading
          case 997: readRotarySwitch(1); break; // DEBUG: Get the value from the rotary switch
          case 998: test_mode(); break;         // DEBUG: go to a 432.5 MHz and run QRO
@@ -944,6 +998,10 @@ void loop()
    // Help
    // ========================================================================
    else if(inch == 'H') display_help();
+  // ========================================================================
+   // Write out current memeory bank
+   // ========================================================================
+   else if(inch == 'G') serial_write_memFrequency();    
    // ========================================================================
    // Check MUX Lock
    // ========================================================================
@@ -965,6 +1023,18 @@ void loop()
       else Serial.print(" Unknown memory location\n"); 
     }
   // ========================================================================
+   // Change frequency bank
+   // ========================================================================
+    else if (inch == 'Y') { // memory
+     Serial.print(" Change to memory bank:\n"); 
+     SerialIn=Serial.parseInt();
+     if(SerialIn >= 0 && SerialIn <= 3){ memBank=SerialIn;
+     change_freq(); 
+     SetADF4351();
+     }
+     else Serial.print(" Unknown memory bank\n"); 
+    }  
+  // ========================================================================
    // Change Power Level 
    // ========================================================================
    else if (inch == 'P') { 
@@ -973,6 +1043,16 @@ void loop()
      if(SerialIn >= 1 && SerialIn <= 4) power_set(SerialIn);
      else Serial.print(" Unknown power level\n"); 
    }
+   // ========================================================================
+   // Change Reference
+   // ========================================================================
+   else if (inch == 'R') { 
+     Serial.print(" Change reference frequency\n"); 
+     if( PFDRFout==10){PFDRFout=25;} //reglage FREF
+       else if ( PFDRFout==25){PFDRFout=10;}
+     change_freq();  
+   }
+
    // ========================================================================
    // Switch between low noise and low spur
    // ========================================================================
